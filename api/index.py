@@ -1,3 +1,4 @@
+from operator import itemgetter
 from fastapi import FastAPI, HTTPException
 from typing import List, Dict, Any
 from langchain_core.messages import AIMessage, HumanMessage
@@ -102,14 +103,16 @@ async def chat(request: ChatRequest):
             return "\n\n".join(doc.page_content for doc in docs)
 
         rag_chain = (
-            {"context": retriever | format_docs, "question": RunnablePassthrough()}
+            {
+                "context": itemgetter("question") | retriever | format_docs,
+                "question": itemgetter("question"),
+            }
             | prompt
             | llm
             | StrOutputParser()
         )
 
-        # response = rag_chain.invoke({"question": request.message})
-        response = rag_chain.invoke(request.message)
+        response = rag_chain.invoke({"question": request.message})
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
