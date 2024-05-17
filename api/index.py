@@ -11,7 +11,7 @@ from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.vectorstores.pgvector import DistanceStrategy
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables import RunnablePassthrough, RunnableParallel
 
 
 # from langchain.chains import create_history_aware_retriever, create_retrieval_chain
@@ -103,16 +103,23 @@ async def chat(request: ChatRequest):
             return "\n\n".join(doc.page_content for doc in docs)
 
         rag_chain = (
-            {
-                "context": itemgetter("question") | retriever | format_docs,
-                "question": itemgetter("question"),
-            }
+            RunnablePassthrough.assign(context=lambda x: format_docs(x["context"]))
             | prompt
             | llm
             | StrOutputParser()
         )
+        # rag_chain = prompt | llm | StrOutputParser()
 
-        response = rag_chain.invoke({"question": request.message})
+        rag_chain_with_source = RunnableParallel(
+            {
+                "context": itemgetter("question") | retriever,
+                "question": itemgetter("question"),
+            }
+        ).assign(answer=rag_chain)
+
+        response = rag_chain_with_source.invoke({"question": request.message})
+        # for chunk in rag_chain_with_source.stream({"question": request.message}):
+        #     print(chunk)
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
