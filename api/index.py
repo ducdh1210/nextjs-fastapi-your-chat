@@ -1,3 +1,4 @@
+import json
 from operator import itemgetter
 from fastapi import FastAPI, HTTPException
 from langchain_community.document_loaders import WebBaseLoader
@@ -91,8 +92,10 @@ async def generate_response(request: ChatRequest):
         {"question": request.message},
         version="v1",
     ):
-        print("event", event)
-        yield {"data": event}
+        kind = event.get("event")
+        if kind == "on_chat_model_stream":
+            content = event["data"]["chunk"].content
+            yield json.dumps({"chunk": content, "message_type_id": "streaming"})
 
 
 if __name__ == "__main__":
