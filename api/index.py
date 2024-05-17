@@ -3,13 +3,25 @@ from typing import List, Dict, Any
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_community.document_loaders import WebBaseLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
+
+# from langchain_community.vectorstores import Chroma
+from langchain_postgres.vectorstores import PGVector
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.chains import create_history_aware_retriever, create_retrieval_chain
+from langchain_community.vectorstores.pgvector import DistanceStrategy
+from langchain_core.prompts import ChatPromptTemplate
+
+import bs4
+from langchain import hub
+
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnablePassthrough
+
+
+# from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from pydantic import BaseModel
-
+import os
 from dotenv import load_dotenv
 import logging
 
@@ -20,9 +32,19 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 load_dotenv()
 
-# Global variables for chat history and vector store
-chat_history = [AIMessage(content="Hello, I am a bot. How can I help you?")]
-vector_store = None
+# load vector store
+os.environ["PGVECTOR_CONNECTION_STRING"] = (
+    f"""postgresql+psycopg://{os.getenv("PGVECTOR_USER")}:{os.getenv("PGVECTOR_PWD")}@{os.getenv("PGVECTOR_HOST")}:{os.getenv("PGVECTOR_PORT")}/{os.getenv("PGVECTOR_DB")}"""
+)
+
+vector_store = PGVector(
+    embeddings=OpenAIEmbeddings(model=os.getenv("OPENAI_EMBED_MODEL")),
+    collection_name=os.getenv("PGVECTOR_COLLECTION"),
+    connection=os.getenv("PGVECTOR_CONNECTION_STRING"),
+    use_jsonb=True,
+)
+retriever = vector_store.as_retriever()
+print(retriever.invoke("who is John Mearsheimer?"))
 
 
 class UrlModel(BaseModel):
@@ -43,8 +65,16 @@ async def get_vectorstore_from_url(item: UrlModel):
         document = loader.load()
         text_splitter = RecursiveCharacterTextSplitter()
         document_chunks = text_splitter.split_documents(document)
-        vector_store = Chroma.from_documents(document_chunks, OpenAIEmbeddings())
-        logger.info(f"Vector store initialized")
+        vector_store = PGVector.from_documents(
+            documents=document_chunks,
+            embedding=OpenAIEmbeddings(),
+            collection_name=os.getenv("PGVECTOR_COLLECTION"),
+            distance_strategy=DistanceStrategy.COSINE,
+            connection=os.environ["PGVECTOR_CONNECTION_STRING"],
+            pre_delete_collection=True,
+        )
+        logger.info("Vector store initialized")
+
         return {"message": "Vector store initialized"}
     except Exception as e:
         logger.error(f"Error in get_vectorstore_from_url: {e}")
@@ -57,72 +87,39 @@ class ChatRequest(BaseModel):
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
-    global chat_history, vector_store
     if vector_store is None:
         raise HTTPException(status_code=404, detail="Vector store not found")
 
     try:
-        user_message = HumanMessage(content=request.message)
+        retriever = vector_store.as_retriever()
+        print(retriever.invoke("who is John Mearsheimer?"))
 
-        retriever_chain = get_context_retriever_chain(vector_store)
-        conversation_rag_chain = get_conversational_rag_chain(retriever_chain)
+        prompt = """You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know. Use three sentences maximum and keep the answer concise.
 
-        logger.info(f"User message: {user_message.content}")
-        logger.info(f"Chat history: {chat_history}")
-        response = conversation_rag_chain.invoke(
-            {"chat_history": chat_history, "input": user_message}
+        Question: {question} 
+
+        Context: {context} 
+
+        Answer:"""
+
+        prompt = ChatPromptTemplate.from_template(prompt)
+        llm = ChatOpenAI(model="gpt-3.5-turbo-0125")
+
+        def format_docs(docs):
+            return "\n\n".join(doc.page_content for doc in docs)
+
+        rag_chain = (
+            {"context": retriever | format_docs, "question": RunnablePassthrough()}
+            | prompt
+            | llm
+            | StrOutputParser()
         )
 
-        chat_history.append(user_message)
-
-        ai_message = AIMessage(content=response["answer"])
-        chat_history.append(ai_message)
-
-        return response["answer"]
+        # response = rag_chain.invoke({"question": request.message})
+        response = rag_chain.invoke("who is John Mearsheimer?")
+        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-def get_context_retriever_chain(vector_store):
-    logger.info("Creating context retriever chain")
-    llm = ChatOpenAI()
-
-    retriever = vector_store.as_retriever()
-
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            MessagesPlaceholder(variable_name="chat_history"),
-            ("user", "{input}"),
-            (
-                "user",
-                "Given the above conversation, generate a search query to look up in order to get information relevant to the conversation",
-            ),
-        ]
-    )
-
-    retriever_chain = create_history_aware_retriever(llm, retriever, prompt)
-
-    return retriever_chain
-
-
-def get_conversational_rag_chain(retriever_chain):
-
-    llm = ChatOpenAI()
-
-    prompt = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                "Answer the user's questions based on the below context:\n\n{context}",
-            ),
-            MessagesPlaceholder(variable_name="chat_history"),
-            ("user", "{input}"),
-        ]
-    )
-
-    stuff_documents_chain = create_stuff_documents_chain(llm, prompt)
-
-    return create_retrieval_chain(retriever_chain, stuff_documents_chain)
 
 
 if __name__ == "__main__":
