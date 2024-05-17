@@ -7,19 +7,14 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 # from langchain_community.vectorstores import Chroma
 from langchain_postgres.vectorstores import PGVector
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_community.vectorstores.pgvector import DistanceStrategy
 from langchain_core.prompts import ChatPromptTemplate
-
-import bs4
-from langchain import hub
-
+from langchain_community.vectorstores.pgvector import DistanceStrategy
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 
 
 # from langchain.chains import create_history_aware_retriever, create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
+
 from pydantic import BaseModel
 import os
 from dotenv import load_dotenv
@@ -44,7 +39,7 @@ vector_store = PGVector(
     use_jsonb=True,
 )
 retriever = vector_store.as_retriever()
-print(retriever.invoke("who is John Mearsheimer?"))
+# print(retriever.invoke("who is John Mearsheimer?"))
 
 
 class UrlModel(BaseModel):
@@ -92,8 +87,6 @@ async def chat(request: ChatRequest):
 
     try:
         retriever = vector_store.as_retriever()
-        print(retriever.invoke("who is John Mearsheimer?"))
-
         prompt = """You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know. Use three sentences maximum and keep the answer concise.
 
         Question: {question} 
@@ -116,7 +109,7 @@ async def chat(request: ChatRequest):
         )
 
         # response = rag_chain.invoke({"question": request.message})
-        response = rag_chain.invoke("who is John Mearsheimer?")
+        response = rag_chain.invoke(request.message)
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

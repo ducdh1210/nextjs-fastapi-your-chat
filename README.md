@@ -33,29 +33,7 @@ The application integrates the Python/FastAPI server into the Next.js app under 
 For backend-only testing:
 
 ```bash
-conda create --name nextjs-fastapi-your-chat python=3.10
-conda activate nextjs-fastapi-your-chat
-pip install -r requirements.txt
-uvicorn api.index:app --reload
+poetry init 
+make run-backend
 ```
 
-## Maintaining Chat History (TODO List)
-
-Options for preserving chat history include:
-
-- **Global Variable**: Simple but not ideal for scalability and consistency.
-- **In-Memory Database/Cache**: Scalable solutions like Redis for storing chat history.
-- **Database Storage**: Robust and persistent method, suitable for production environments.
-
-## Understanding RAG Algorithms
-
-RAG (Retrieval Augmented Generation) enhances language models with context retrieved from a custom knowledge base. The process involves fetching HTML documents, splitting them into chunks, and vectorizing these chunks using embedding models like OpenAI's. This vectorized data forms a vector store, enabling semantic searches based on user queries. The retrieved relevant chunks are then used as context for the language model, forming a comprehensive response to user inquiries.
-
-## Implementing Context Retrieval
-
-The `get_vectorstore_from_url` function extracts and processes text from a given URL, while `get_context_retriever_chain` forms a chain that retrieves context relevant to the entire conversation history. This pipeline approach ensures that responses are contextually aware and accurate.
-
-## Inspiration and References
-
-- [chat-with-websites](https://github.com/alejandro-ao/chat-with-websites)
-- [next13-ai-saas](https://github.com/AntonioErdeljac/next13-ai-saas)
