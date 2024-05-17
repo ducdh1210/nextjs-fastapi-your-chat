@@ -5,19 +5,17 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 # from langchain_community.vectorstores import Chroma
 from langchain_postgres.vectorstores import PGVector
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores.pgvector import DistanceStrategy
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough, RunnableParallel
+
 import os
 from dotenv import load_dotenv
 from pydantic import BaseModel
 import logging
 
-from api.chain import runnable
+from sse_starlette import EventSourceResponse
 
-# from langchain.chains import create_history_aware_retriever, create_retrieval_chain
+from api.chain import runnable
 
 
 # Configure logging
@@ -73,6 +71,28 @@ async def chat(request: ChatRequest):
         return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/streaming", response_class=EventSourceResponse)
+async def streaming(
+    request: ChatRequest,
+):
+    try:
+        return EventSourceResponse(
+            generate_response(request=request),
+            media_type="text/event-stream",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def generate_response(request: ChatRequest):
+    async for event in runnable.astream_events(
+        {"question": request.message},
+        version="v1",
+    ):
+        print("event", event)
+        yield {"data": event}
 
 
 if __name__ == "__main__":
